@@ -18,7 +18,10 @@ use std::time::{Duration, Instant};
 
 use snarkvm_algorithms::{
     crypto_hash::PoseidonSponge,
-    snark::marlin::{ahp::AHPForR1CS, FiatShamirAlgebraicSpongeRng, MarlinHidingMode, MarlinSNARK},
+    snark::marlin::{
+        ahp::AHPForR1CS, CircuitVerifyingKey, FiatShamirAlgebraicSpongeRng, MarlinHidingMode,
+        MarlinSNARK,
+    },
     SNARK,
 };
 use snarkvm_curves::bls12_377::{Bls12_377, Fq, Fr};
@@ -28,6 +31,25 @@ use snarkvm_utilities::Uniform;
 
 use rand::{self, thread_rng, Rng};
 use rstat::{normal::UvNormal, Distribution};
+
+//********************************************************************
+// TODO - The following function may be modified by contestants
+//********************************************************************
+fn verify_group(
+    group_proofs: &Vec<((<MarlinInst as SNARK>::Proof, Vec<Fr>), bool)>,
+    circuit_vk: &CircuitVerifyingKey<Bls12_377, MarlinHidingMode>,
+) -> Vec<bool> {
+    let mut results = vec![];
+    group_proofs.iter().for_each(|((proof, inputs), _faulty)| {
+        let verified = MarlinInst::verify_batch(&circuit_vk, &inputs, &proof).unwrap();
+        results.push(verified);
+    });
+    results
+}
+
+//********************************************************************
+// All code below here may not be modified
+//********************************************************************
 
 type MarlinInst = MarlinSNARK<Bls12_377, FS, MarlinHidingMode, Fr>;
 type FS = FiatShamirAlgebraicSpongeRng<Fr, Fq, PoseidonSponge<Fq, 6, 1>>;
@@ -106,6 +128,17 @@ fn snark_prove(
     }
 
     (MarlinInst::prove_batch(pk, &circuits, rng).unwrap(), inputs)
+}
+
+fn check_group_results(
+    group_proofs: &Vec<((<MarlinInst as SNARK>::Proof, Vec<Fr>), bool)>,
+    results: &Vec<bool>,
+) {
+    for (((_p, _i), faulty), result) in group_proofs.iter().zip(results) {
+        if *faulty == *result {
+            panic!("Verifier algorithm failed!");
+        }
+    }
 }
 
 fn main() {
@@ -188,46 +221,22 @@ fn main() {
     let mut round_counter = 0;
     let now = Instant::now();
     loop {
-        round_1_proofs.iter().for_each(|((proof, inputs), faulty)| {
-            let mut verified = MarlinInst::verify_batch(&params.1, &inputs, &proof).unwrap();
-            if *faulty {
-                verified = !verified;
-            }
-
-            if !verified {
-                panic!("Verifier algorithm failed!");
-            }
-        });
+        let results = verify_group(&round_1_proofs, &params.1);
+        check_group_results(&round_1_proofs, &results);
         round_counter += 1;
         if now.elapsed() > Duration::from_secs(CHALLENGE_DURATION) {
             break;
         }
 
-        round_2_proofs.iter().for_each(|((proof, inputs), faulty)| {
-            let mut verified = MarlinInst::verify_batch(&params.1, &inputs, &proof).unwrap();
-            if *faulty {
-                verified = !verified;
-            }
-
-            if !verified {
-                panic!("Verifier algorithm failed!");
-            }
-        });
+        let results = verify_group(&round_2_proofs, &params.1);
+        check_group_results(&round_2_proofs, &results);
         round_counter += 1;
         if now.elapsed() > Duration::from_secs(CHALLENGE_DURATION) {
             break;
         }
 
-        round_3_proofs.iter().for_each(|((proof, inputs), faulty)| {
-            let mut verified = MarlinInst::verify_batch(&params.1, &inputs, &proof).unwrap();
-            if *faulty {
-                verified = !verified;
-            }
-
-            if !verified {
-                panic!("Verifier algorithm failed!");
-            }
-        });
+        let results = verify_group(&round_3_proofs, &params.1);
+        check_group_results(&round_3_proofs, &results);
         round_counter += 1;
         if now.elapsed() > Duration::from_secs(CHALLENGE_DURATION) {
             break;
